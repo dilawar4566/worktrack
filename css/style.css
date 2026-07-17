@@ -171,3 +171,67 @@
     /* Attendance bar */
     .att-bar { height: 8px; background: #f1f5f9; border-radius: 4px; overflow: hidden; }
     .att-fill { height: 100%; border-radius: 4px; }
+
+    /* ─── Mobile Responsive ────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .nav { padding: 0 .75rem; flex-wrap: wrap; height: auto; min-height: 56px; row-gap: .35rem; padding-top: .4rem; padding-bottom: .4rem; }
+      .nav-brand { font-size: 1rem; margin-right: auto; }
+      .nav-tab { height: 38px; padding: 0 .55rem; font-size: .78rem; }
+      .nav-right { margin-left: 0; width: 100%; justify-content: space-between; gap: .4rem; }
+      .nav-email { display: none; }
+      .nav-logout { padding: .3rem .6rem; font-size: .75rem; margin-left: auto; }
+
+      .page { margin: 1rem auto; padding: 0 .85rem; padding-bottom: 3rem; }
+      .page-header h2 { font-size: 1.15rem; }
+      .page-header p { font-size: .78rem; }
+
+      .card { padding: 1rem; border-radius: 10px; }
+      .card-title { font-size: .92rem; margin-bottom: .9rem; }
+
+      .stat { padding: 1rem 1.1rem; }
+      .stat-value { font-size: 1.5rem; }
+
+      .auth-wrap { padding: .75rem; }
+      .auth-card { padding: 1.5rem 1.25rem; border-radius: 16px; }
+      .auth-logo h1 { font-size: 1.5rem; }
+
+      .active-card { padding: 1.25rem; }
+      .active-card .timer { font-size: 2.1rem; }
+
+      .filters { gap: .6rem; }
+      .filters > div { flex: 1 1 100%; }
+      .filter-input { width: 100%; }
+      .filters .btn { flex: 1 1 100%; margin-top: 0 !important; }
+
+      .modal { padding: 1.25rem; border-radius: 12px; max-height: 88vh; }
+      .modal-title { font-size: 1rem; margin-bottom: 1rem; }
+      .modal-footer { flex-direction: column-reverse; gap: .5rem; }
+      .modal-footer .btn { width: 100%; }
+      .modal .grid3 { grid-template-columns: 1fr; }
+
+      .accordion-header { flex-wrap: wrap; row-gap: .5rem; padding: .85rem 1rem; }
+      .accordion-info { min-width: 60%; }
+      .accordion-meta { margin-left: auto; gap: .85rem; }
+
+      .salary-card { padding: 1rem; }
+      .salary-card > div:first-child { flex-wrap: wrap; }
+      .salary-card > div:first-child > div:last-child { text-align: left; width: 100%; margin-top: .4rem; }
+
+      .rate-row { width: 100%; }
+      .rate-input { flex: 1; width: auto; }
+
+      table { font-size: .8rem; }
+      th, td { padding: .55rem .6rem; }
+
+      .tabs { flex-wrap: wrap; }
+      .tab { flex: 1 1 auto; font-size: .78rem; padding: .5rem .4rem; }
+
+      .grid4 { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 400px) {
+      .nav-brand { display: none; }
+      .stat-value { font-size: 1.3rem; }
+      .active-card .timer { font-size: 1.8rem; }
+      .auth-card { padding: 1.25rem 1rem; }
+    }
