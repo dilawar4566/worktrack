@@ -38,6 +38,9 @@ const S = {
   // Salary date range (separate from session filter)
   salaryFrom: '', salaryTo: '',
 
+  // Mobile nav
+  mobileNavOpen: false,
+
   // Manual modal
   showManualModal: false,
   manualEmail: '', manualTitle: '', manualDesc: '',
@@ -50,6 +53,11 @@ const S = {
 
 // ─── Helpers ──────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
+
+// Escape user-controlled text before it goes into innerHTML or an HTML
+// attribute, so a task title / name / etc. can't inject markup or scripts.
+const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function esc(v) { return String(v ?? '').replace(/[&<>"']/g, c => ESC_MAP[c]); }
 
 function fmt(d) {
   return new Date(d).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -317,11 +325,11 @@ function renderAuth() {
       ${S.authMode === 'signup' ? `
       <div class="form-group">
         <label>Full Name</label>
-        <input id="authName" type="text" placeholder="Your name" value="${S.authName}">
+        <input id="authName" type="text" placeholder="Your name" value="${esc(S.authName)}">
       </div>` : ''}
       <div class="form-group">
         <label>Email Address</label>
-        <input id="authEmail" type="email" placeholder="you@company.com" value="${S.authEmail}">
+        <input id="authEmail" type="email" placeholder="you@company.com" value="${esc(S.authEmail)}">
       </div>
       <div class="form-group">
         <label>Password</label>
@@ -344,11 +352,14 @@ function renderNav() {
   return `
   <nav class="nav">
     <div class="nav-brand">⏱ WorkTrack Pro</div>
-    ${tabs.map(([p,l]) => `<a class="nav-tab ${S.page===p?'active':''}" href="#" data-action="nav" data-page="${p}">${l}</a>`).join('')}
-    <div class="nav-right">
-      <span class="nav-email">${S.user?.email || ''}</span>
-      ${S.activeSession ? `<span class="badge badge-green"><span class="dot-live"></span> Active</span>` : ''}
-      <button class="nav-logout" data-action="logout">Sign Out</button>
+    <button class="nav-hamburger" data-action="toggleMobileNav" aria-label="Menu">${S.mobileNavOpen ? '✕' : '☰'}</button>
+    <div class="nav-menu ${S.mobileNavOpen ? 'open' : ''}">
+      ${tabs.map(([p,l]) => `<a class="nav-tab ${S.page===p?'active':''}" href="#" data-action="nav" data-page="${p}">${l}</a>`).join('')}
+      <div class="nav-right">
+        <span class="nav-email">${esc(S.user?.email || '')}</span>
+        ${S.activeSession ? `<span class="badge badge-green"><span class="dot-live"></span> Active</span>` : ''}
+        <button class="nav-logout" data-action="logout">Sign Out</button>
+      </div>
     </div>
   </nav>`;
 }
@@ -360,7 +371,7 @@ function renderDashboard() {
 
   return `
   <div class="page-header">
-    <h2>Good ${getGreeting()}, ${S.user?.email?.split('@')[0] || 'there'} 👋</h2>
+    <h2>Good ${getGreeting()}, ${esc(S.user?.email?.split('@')[0] || 'there')} 👋</h2>
     <p>${new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })}</p>
   </div>
 
@@ -386,10 +397,10 @@ function renderDashboard() {
 
   ${S.activeSession ? `
   <div class="active-card mb-2">
-    <div class="task-name">📌 ${S.activeSession.task_title}</div>
+    <div class="task-name">📌 ${esc(S.activeSession.task_title)}</div>
     <div class="timer">${S.timerDisplay}</div>
     <div class="since">Clocked in at ${fmt(S.activeSession.clock_in)}</div>
-    ${S.activeSession.task_description ? `<div class="since" style="margin-top:.2rem">${S.activeSession.task_description}</div>` : ''}
+    ${S.activeSession.task_description ? `<div class="since" style="margin-top:.2rem">${esc(S.activeSession.task_description)}</div>` : ''}
     <button class="btn btn-danger mt-2" data-action="clockOut"
       style="background:rgba(255,255,255,.15);border:1.5px solid rgba(255,255,255,.4);color:white">
       ⏹ Clock Out Now
@@ -399,11 +410,11 @@ function renderDashboard() {
     <div class="card-title">▶ Clock In</div>
     <div class="form-group">
       <label>Task Title *</label>
-      <input id="clockTitle" type="text" placeholder="What are you working on?" value="${S.clockTitle}">
+      <input id="clockTitle" type="text" placeholder="What are you working on?" value="${esc(S.clockTitle)}">
     </div>
     <div class="form-group">
       <label>Description (optional)</label>
-      <textarea id="clockDesc" placeholder="Any additional details...">${S.clockDesc}</textarea>
+      <textarea id="clockDesc" placeholder="Any additional details...">${esc(S.clockDesc)}</textarea>
     </div>
     <button class="btn btn-success" data-action="clockIn" ${S.clockLoading ? 'disabled' : ''}>
       ${S.clockLoading ? '<span class="spin"></span> Starting...' : '▶ Clock In'}
@@ -420,8 +431,8 @@ function renderDashboard() {
             ${S.todaySessions.map(s => `
             <tr>
               <td>
-                <div style="font-weight:600">${s.task_title}</div>
-                ${s.task_description ? `<div class="text-xs text-muted mt-1">${s.task_description}</div>` : ''}
+                <div style="font-weight:600">${esc(s.task_title)}</div>
+                ${s.task_description ? `<div class="text-xs text-muted mt-1">${esc(s.task_description)}</div>` : ''}
                 ${s.is_manual ? `<span class="badge badge-purple text-xs" style="margin-top:.25rem">manual</span>` : ''}
               </td>
               <td class="text-sm">${fmt(s.clock_in)}</td>
@@ -455,7 +466,7 @@ function renderHistory() {
   <div class="filters">
     <div>
       <label>Search</label>
-      <input class="filter-input" id="histSearch" placeholder="🔍 Task name..." value="${S.historySearch}" data-action="histSearch" style="width:200px">
+      <input class="filter-input" id="histSearch" placeholder="🔍 Task name..." value="${esc(S.historySearch)}" data-action="histSearch" style="width:200px">
     </div>
     <div>
       <label>From</label>
@@ -485,8 +496,8 @@ function renderHistory() {
             <tr>
               <td class="text-sm" style="white-space:nowrap">${fmtDate(s.clock_in)}</td>
               <td>
-                <div style="font-weight:600">${s.task_title}</div>
-                ${s.task_description ? `<div class="text-xs text-muted">${s.task_description}</div>` : ''}
+                <div style="font-weight:600">${esc(s.task_title)}</div>
+                ${s.task_description ? `<div class="text-xs text-muted">${esc(s.task_description)}</div>` : ''}
                 ${s.is_manual ? `<span class="badge badge-purple" style="font-size:.7rem">manual</span>` : ''}
               </td>
               <td class="text-sm">${fmt(s.clock_in)}</td>
@@ -534,7 +545,7 @@ function renderAdminSessions() {
   <div class="filters">
     <div>
       <label>Search</label>
-      <input class="filter-input" id="adminSearch" placeholder="🔍 Employee or task..." value="${S.adminSearch}" data-action="adminSearch" style="width:220px">
+      <input class="filter-input" id="adminSearch" placeholder="🔍 Employee or task..." value="${esc(S.adminSearch)}" data-action="adminSearch" style="width:220px">
     </div>
     <div>
       <label>From</label>
@@ -574,8 +585,8 @@ function renderAccordion(email, rows) {
     <div class="accordion-header" data-action="toggleEmp" data-email="${email}">
       <div class="accordion-avatar" style="background:${color}20;color:${color}">${initials(email)}</div>
       <div class="accordion-info">
-        <div class="accordion-name">${prof.full_name || email.split('@')[0]}</div>
-        <div class="accordion-email">${email}</div>
+        <div class="accordion-name">${esc(prof.full_name || email.split('@')[0])}</div>
+        <div class="accordion-email">${esc(email)}</div>
       </div>
       <div class="accordion-meta">
         ${active ? `<span class="badge badge-green"><span class="dot-live"></span> Active</span>` : ''}
@@ -599,8 +610,8 @@ function renderAccordion(email, rows) {
           <tr>
             <td class="text-sm" style="white-space:nowrap">${fmtDate(s.clock_in)}</td>
             <td>
-              <div style="font-weight:600">${s.task_title}</div>
-              ${s.task_description ? `<div class="text-xs text-muted">${s.task_description}</div>` : ''}
+              <div style="font-weight:600">${esc(s.task_title)}</div>
+              ${s.task_description ? `<div class="text-xs text-muted">${esc(s.task_description)}</div>` : ''}
             </td>
             <td class="text-sm">${fmt(s.clock_in)}</td>
             <td class="text-sm">${s.clock_out ? fmt(s.clock_out) : `<span class="badge badge-green">Active</span>`}</td>
@@ -677,7 +688,7 @@ function renderAdminSalary() {
           <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
             <div class="accordion-avatar" style="background:${color}20;color:${color}">${initials(e.email)}</div>
             <div style="flex:1;min-width:0">
-              <div style="font-weight:700">${e.email}</div>
+              <div style="font-weight:700">${esc(e.email)}</div>
               <div class="text-sm text-muted">${e.sessions} sessions · ${e.hours.toFixed(2)} hours</div>
             </div>
             <div style="text-align:right">
@@ -689,7 +700,7 @@ function renderAdminSalary() {
           <div class="rate-row mt-2">
             <span class="text-sm text-muted" style="white-space:nowrap">Hourly Rate:</span>
             ${editing ? `
-              <input class="rate-input" id="rateInput_${e.email.replace('@','_')}" type="number" min="0" step="0.01" value="${S.rateValue}" placeholder="0.00">
+              <input class="rate-input" id="rateInput_${e.email.replace('@','_')}" type="number" min="0" step="0.01" value="${esc(S.rateValue)}" placeholder="0.00">
               <button class="btn btn-primary btn-sm" data-action="saveRate" data-email="${e.email}">Save</button>
               <button class="btn btn-outline btn-sm" data-action="cancelRate">Cancel</button>
             ` : `
@@ -748,8 +759,8 @@ function renderAdminAttendance() {
                   <div style="display:flex;align-items:center;gap:.5rem">
                     <div class="accordion-avatar" style="width:32px;height:32px;font-size:.8rem;background:${color}20;color:${color}">${initials(email)}</div>
                     <div>
-                      <div style="font-weight:600">${prof.full_name || email.split('@')[0]}</div>
-                      <div class="text-xs text-muted">${email}</div>
+                      <div style="font-weight:600">${esc(prof.full_name || email.split('@')[0])}</div>
+                      <div class="text-xs text-muted">${esc(email)}</div>
                     </div>
                   </div>
                 </td>
@@ -780,15 +791,15 @@ function renderManualModal() {
       ${S.manualError ? `<div class="alert alert-error">${S.manualError}</div>` : ''}
       <div class="form-group">
         <label>Employee Email *</label>
-        <input id="manEmail" type="email" placeholder="employee@company.com" value="${S.manualEmail}">
+        <input id="manEmail" type="email" placeholder="employee@company.com" value="${esc(S.manualEmail)}">
       </div>
       <div class="form-group">
         <label>Task Title *</label>
-        <input id="manTitle" type="text" placeholder="What did they work on?" value="${S.manualTitle}">
+        <input id="manTitle" type="text" placeholder="What did they work on?" value="${esc(S.manualTitle)}">
       </div>
       <div class="form-group">
         <label>Description (optional)</label>
-        <textarea id="manDesc" placeholder="Additional details...">${S.manualDesc}</textarea>
+        <textarea id="manDesc" placeholder="Additional details...">${esc(S.manualDesc)}</textarea>
       </div>
       <div class="grid3">
         <div class="form-group">
@@ -824,7 +835,7 @@ function renderIdleModal() {
     <div class="modal" onclick="event.stopPropagation()">
       <div class="modal-title">⏰ Still working?</div>
       <p style="color:#475569;margin:-.5rem 0 1.25rem;line-height:1.5">
-        Your timer for <strong>${S.activeSession?.task_title || 'this task'}</strong> has been running for about ${hrs} hour${hrs > 1 ? 's' : ''} straight.
+        Your timer for <strong>${esc(S.activeSession?.task_title || 'this task')}</strong> has been running for about ${hrs} hour${hrs > 1 ? 's' : ''} straight.
         Add a quick note if you're still on it, or clock out if you forgot to earlier.
       </p>
       <div class="form-group">
@@ -874,8 +885,14 @@ async function handleClick(e) {
     case 'nav':
       e.preventDefault();
       S.page = page;
+      S.mobileNavOpen = false;
       if (page === 'history') { await loadAll(); }
       if (page === 'admin')   { await loadAdminData(); }
+      render();
+      break;
+
+    case 'toggleMobileNav':
+      S.mobileNavOpen = !S.mobileNavOpen;
       render();
       break;
 
@@ -909,7 +926,7 @@ async function handleClick(e) {
     case 'logout':
       clearInterval(S.timerInterval);
       await sb.auth.signOut();
-      Object.assign(S, { user: null, isAdmin: false, page: 'auth', todaySessions: [], allSessions: [], adminSessions: [], activeSession: null, timerInterval: null });
+      Object.assign(S, { user: null, isAdmin: false, page: 'auth', todaySessions: [], allSessions: [], adminSessions: [], activeSession: null, timerInterval: null, mobileNavOpen: false });
       render();
       break;
 
