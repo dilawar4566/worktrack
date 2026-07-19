@@ -24,6 +24,7 @@ const S = {
   clockTitle: '', clockDesc: '', clockLoading: false,
   timerInterval: null, timerDisplay: '0h 0m 0s',
   showIdleModal: false, idleAcknowledgedUntil: null, idleSessionId: null,
+  showClockInModal: false, clockInError: '',
 
   // History
   allSessions: [],
@@ -49,6 +50,11 @@ const S = {
 
   // Rate editing
   editingRate: null, rateValue: '',
+
+  // Admin: edit any session
+  editingSession: null,
+  editTitle: '', editDesc: '', editDate: '', editClockIn: '', editClockOut: '',
+  editLoading: false, editError: '',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -86,6 +92,16 @@ function durHours(sessions) {
     .reduce((sum, s) => sum + durMin(s.clock_in, s.clock_out) / 60, 0);
 }
 function todayStr() { return new Date().toISOString().split('T')[0]; }
+function isoToLocalDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function isoToLocalTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
 function monthStr() {
   const n = new Date();
   return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-01`;
@@ -185,7 +201,8 @@ async function checkAdmin() {
 // ─── Actions ──────────────────────────────────────────────────
 async function doClockIn() {
   const title = S.clockTitle.trim();
-  if (!title) { alert('Please enter a task title'); return; }
+  S.clockInError = '';
+  if (!title) { S.clockInError = 'Please enter a task title'; render(); return; }
   S.clockLoading = true; render();
   const { error } = await sb.from('work_sessions').insert({
     user_id: S.user.id, user_email: S.user.email,
@@ -193,8 +210,42 @@ async function doClockIn() {
     clock_in: new Date().toISOString(),
   });
   S.clockLoading = false;
-  if (!error) { S.clockTitle = ''; S.clockDesc = ''; }
+  if (error) { S.clockInError = error.message; render(); return; }
+  S.clockTitle = ''; S.clockDesc = ''; S.showClockInModal = false;
   await loadToday(); render();
+}
+
+async function doSaveSessionEdit() {
+  if (!S.editingSession) return;
+  S.editError = '';
+  const title = S.editTitle.trim();
+  if (!title || !S.editDate || !S.editClockIn) {
+    S.editError = 'Task title, date, and clock-in time are required.';
+    render();
+    return;
+  }
+  const ciISO = new Date(`${S.editDate}T${S.editClockIn}`).toISOString();
+  let coISO = null;
+  if (S.editClockOut) {
+    coISO = new Date(`${S.editDate}T${S.editClockOut}`).toISOString();
+    if (new Date(coISO) <= new Date(ciISO)) {
+      S.editError = 'Clock out must be after clock in.';
+      render();
+      return;
+    }
+  }
+  S.editLoading = true; render();
+  const { error } = await sb.from('work_sessions').update({
+    task_title: title,
+    task_description: S.editDesc.trim(),
+    clock_in: ciISO,
+    clock_out: coISO,
+  }).eq('id', S.editingSession.id);
+  S.editLoading = false;
+  if (error) { S.editError = error.message; render(); return; }
+  S.editingSession = null;
+  await loadAdminData();
+  render();
 }
 
 async function doClockOut() {
@@ -303,6 +354,8 @@ function render() {
       </div>
       ${S.showManualModal ? renderManualModal() : ''}
       ${S.showIdleModal ? renderIdleModal() : ''}
+      ${S.showClockInModal ? renderClockInModal() : ''}
+      ${S.editingSession ? renderEditSessionModal() : ''}
     `;
   }
   attachEvents();
@@ -407,18 +460,9 @@ function renderDashboard() {
     </button>
   </div>` : `
   <div class="card mb-2">
-    <div class="card-title">▶ Clock In</div>
-    <div class="form-group">
-      <label>Task Title *</label>
-      <input id="clockTitle" type="text" placeholder="What are you working on?" value="${esc(S.clockTitle)}">
-    </div>
-    <div class="form-group">
-      <label>Description (optional)</label>
-      <textarea id="clockDesc" placeholder="Any additional details...">${esc(S.clockDesc)}</textarea>
-    </div>
-    <button class="btn btn-success" data-action="clockIn" ${S.clockLoading ? 'disabled' : ''}>
-      ${S.clockLoading ? '<span class="spin"></span> Starting...' : '▶ Clock In'}
-    </button>
+    <div class="card-title">▶ Ready to start?</div>
+    <p class="text-sm text-muted mb-2">Clock in and tell us what you're working on.</p>
+    <button class="btn btn-success" data-action="openClockIn">▶ Clock In</button>
   </div>`}
 
   <div class="card">
@@ -604,7 +648,7 @@ function renderAccordion(email, rows) {
         <span class="ml-auto text-sm text-muted">${rows.length} sessions · ${hours.toFixed(2)} total hours</span>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Date</th><th>Task</th><th>In</th><th>Out</th><th>Duration</th><th>Type</th></tr></thead>
+        <thead><tr><th>Date</th><th>Task</th><th>In</th><th>Out</th><th>Duration</th><th>Type</th><th></th></tr></thead>
         <tbody>
           ${rows.map(s => `
           <tr>
@@ -617,6 +661,7 @@ function renderAccordion(email, rows) {
             <td class="text-sm">${s.clock_out ? fmt(s.clock_out) : `<span class="badge badge-green">Active</span>`}</td>
             <td class="text-sm">${s.clock_out ? fmtDur(s.clock_in, s.clock_out) : '—'}</td>
             <td>${s.is_manual ? `<span class="badge badge-purple">Manual</span>` : `<span class="badge badge-gray">Normal</span>`}</td>
+            <td><button class="btn btn-outline btn-xs" data-action="editSession" data-id="${s.id}">✏ Edit</button></td>
           </tr>`).join('')}
         </tbody>
       </table></div>
@@ -850,6 +895,77 @@ function renderIdleModal() {
   </div>`;
 }
 
+// ─── Clock In Modal ─────────────────────────────────────────────
+function renderClockInModal() {
+  return `
+  <div class="modal-bg" data-action="closeClockInModal">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title">▶ Clock In</div>
+      ${S.clockInError ? `<div class="alert alert-error">${esc(S.clockInError)}</div>` : ''}
+      <div class="form-group">
+        <label>Task Title *</label>
+        <input id="clockTitle" type="text" placeholder="What are you working on?" value="${esc(S.clockTitle)}" autofocus>
+      </div>
+      <div class="form-group">
+        <label>Description (optional)</label>
+        <textarea id="clockDesc" placeholder="Any additional details...">${esc(S.clockDesc)}</textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-action="closeClockInModal">Cancel</button>
+        <button class="btn btn-success" data-action="submitClockIn" ${S.clockLoading ? 'disabled' : ''}>
+          ${S.clockLoading ? '<span class="spin"></span> Starting...' : '▶ Start Timer'}
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─── Admin: Edit Session Modal ───────────────────────────────────
+function renderEditSessionModal() {
+  const s = S.editingSession;
+  if (!s) return '';
+  return `
+  <div class="modal-bg" data-action="closeEditModal">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title">✏ Edit Session</div>
+      ${S.editError ? `<div class="alert alert-error">${esc(S.editError)}</div>` : ''}
+      <div class="form-group">
+        <label>Employee</label>
+        <input type="text" value="${esc(s.user_email || '')}" disabled style="background:#f8fafc;color:#94a3b8">
+      </div>
+      <div class="form-group">
+        <label>Task Title *</label>
+        <input id="editTitle" type="text" value="${esc(S.editTitle)}">
+      </div>
+      <div class="form-group">
+        <label>Description (optional)</label>
+        <textarea id="editDesc">${esc(S.editDesc)}</textarea>
+      </div>
+      <div class="grid3">
+        <div class="form-group">
+          <label>Date *</label>
+          <input id="editDate" type="date" value="${S.editDate}">
+        </div>
+        <div class="form-group">
+          <label>Clock In *</label>
+          <input id="editClockIn" type="time" value="${S.editClockIn}">
+        </div>
+        <div class="form-group">
+          <label>Clock Out</label>
+          <input id="editClockOut" type="time" value="${S.editClockOut}">
+        </div>
+      </div>
+      <p class="text-xs text-muted" style="margin-top:-.5rem;margin-bottom:1rem">Leave Clock Out empty to keep this session active.</p>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-action="closeEditModal">Cancel</button>
+        <button class="btn btn-primary" data-action="submitEdit" ${S.editLoading ? 'disabled' : ''}>
+          ${S.editLoading ? '<span class="spin"></span> Saving...' : 'Save Changes'}
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
 // ─── Events ───────────────────────────────────────────────────
 function attachEvents() {
   document.querySelectorAll('[data-action]').forEach(el => {
@@ -878,7 +994,7 @@ function handleChange(e) {
 }
 
 async function handleClick(e) {
-  const { action, page, val, tab, email, rate } = e.currentTarget.dataset;
+  const { action, page, val, tab, email, rate, id } = e.currentTarget.dataset;
 
   switch (action) {
     // Nav
@@ -931,12 +1047,44 @@ async function handleClick(e) {
       break;
 
     // Clock
-    case 'clockIn':
+    case 'openClockIn':
+      S.showClockInModal = true; S.clockInError = ''; render();
+      break;
+    case 'closeClockInModal':
+      S.showClockInModal = false; render();
+      break;
+    case 'submitClockIn':
       S.clockTitle = $('clockTitle')?.value || '';
       S.clockDesc  = $('clockDesc')?.value  || '';
       await doClockIn();
       break;
     case 'clockOut': await doClockOut(); break;
+
+    // Admin: edit any employee's session
+    case 'editSession': {
+      const sess = S.adminSessions.find(x => String(x.id) === String(id));
+      if (!sess) break;
+      S.editingSession = sess;
+      S.editTitle    = sess.task_title || '';
+      S.editDesc     = sess.task_description || '';
+      S.editDate     = isoToLocalDate(sess.clock_in);
+      S.editClockIn  = isoToLocalTime(sess.clock_in);
+      S.editClockOut = sess.clock_out ? isoToLocalTime(sess.clock_out) : '';
+      S.editError = '';
+      render();
+      break;
+    }
+    case 'closeEditModal':
+      S.editingSession = null; render();
+      break;
+    case 'submitEdit':
+      S.editTitle    = $('editTitle')?.value    || '';
+      S.editDesc     = $('editDesc')?.value     || '';
+      S.editDate     = $('editDate')?.value     || '';
+      S.editClockIn  = $('editClockIn')?.value  || '';
+      S.editClockOut = $('editClockOut')?.value || '';
+      await doSaveSessionEdit();
+      break;
 
     // History
     case 'histApply': await loadAll(); render(); break;
