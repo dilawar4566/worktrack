@@ -9,8 +9,8 @@
     .nav-tab.active { color: white; border-bottom-color: #6366f1; }
     .nav-right { margin-left: auto; display: flex; align-items: center; gap: .5rem; }
     .nav-email { color: #64748b; font-size: .8rem; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .nav-logout { background: none; border: 1px solid #334155; color: #94a3b8; padding: .35rem .75rem; border-radius: 6px; cursor: pointer; font-size: .8rem; white-space: nowrap; }
-    .nav-logout:hover { background: #334155; color: white; }
+    .nav-logout, .nav-account { background: none; border: 1px solid #334155; color: #94a3b8; padding: .35rem .75rem; border-radius: 6px; cursor: pointer; font-size: .8rem; white-space: nowrap; }
+    .nav-logout:hover, .nav-account:hover { background: #334155; color: white; }
     .nav-menu { display: flex; align-items: center; flex: 1; min-width: 0; }
     .nav-hamburger { display: none; background: none; border: none; color: white; font-size: 1.4rem; line-height: 1; cursor: pointer; padding: .4rem .5rem; margin-left: auto; }
 
@@ -191,7 +191,7 @@
       .nav-tab.active { border-left-color: #6366f1; }
       .nav-right { margin-left: 0; margin-top: .75rem; width: 100%; flex-direction: column; align-items: stretch; gap: .6rem; }
       .nav-email { display: block; max-width: none; text-align: center; }
-      .nav-logout { margin-left: 0; padding: .55rem .6rem; font-size: .82rem; }
+      .nav-logout, .nav-account { margin-left: 0; padding: .55rem .6rem; font-size: .82rem; }
 
       .page { margin: 1rem auto; padding: 0 .85rem; padding-bottom: 3rem; }
       .page-header h2 { font-size: 1.15rem; }

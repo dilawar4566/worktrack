@@ -55,6 +55,13 @@ const S = {
   editingSession: null,
   editTitle: '', editDesc: '', editDate: '', editClockIn: '', editClockOut: '',
   editLoading: false, editError: '',
+
+  // Admin: password reset + delete employee
+  resetSentFor: null, adminActionError: '',
+  deletingEmployee: null, deleteError: '', deleteLoading: false,
+
+  // My Account (self password change)
+  showAccountModal: false, accountError: '', accountSuccess: '', accountLoading: false,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -289,6 +296,70 @@ async function doSaveRate(email) {
   await loadAdminData(); render();
 }
 
+// Admin: force-close a session that got left running (e.g. someone forgot
+// to clock out days ago). Sets clock_out to right now.
+async function doForceClockOut(sessionId) {
+  S.adminActionError = '';
+  const { error } = await sb.from('work_sessions').update({ clock_out: new Date().toISOString() }).eq('id', sessionId);
+  if (error) { S.adminActionError = error.message; render(); return; }
+  await loadAdminData(); render();
+}
+
+// Admin: send a password-reset email to an employee. This is the only safe
+// way to help someone reset their password from client-side code, setting
+// a password directly would require Supabase's service_role key, which
+// must never be shipped to the browser.
+async function doSendPasswordReset(email) {
+  S.adminActionError = '';
+  const redirectTo = window.location.origin + window.location.pathname;
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) { S.adminActionError = error.message; render(); return; }
+  S.resetSentFor = email;
+  render();
+  setTimeout(() => { if (S.resetSentFor === email) { S.resetSentFor = null; render(); } }, 5000);
+}
+
+// Admin: permanently delete an employee's profile and every session they've
+// ever logged. Does NOT delete their login (that requires the Supabase
+// dashboard / service_role key), so they could still sign back in with a
+// blank slate afterward.
+async function doDeleteEmployee() {
+  const email = S.deletingEmployee;
+  if (!email) return;
+  const confirmText = ($('deleteConfirmInput')?.value || '').trim();
+  S.deleteError = '';
+  if (confirmText !== email) {
+    S.deleteError = 'Type the email exactly to confirm.';
+    render();
+    return;
+  }
+  S.deleteLoading = true; render();
+  const { error: sessErr } = await sb.from('work_sessions').delete().eq('user_email', email);
+  if (sessErr) { S.deleteLoading = false; S.deleteError = sessErr.message; render(); return; }
+  const { error: profErr } = await sb.from('employee_profiles').delete().eq('email', email);
+  S.deleteLoading = false;
+  if (profErr) { S.deleteError = profErr.message; render(); return; }
+  S.deletingEmployee = null;
+  if (S.openEmployee === email) S.openEmployee = null;
+  await loadAdminData(); render();
+}
+
+// Self-service: change your own password (works for any logged-in user,
+// including the admin, without needing anyone else's credentials).
+async function doChangeOwnPassword() {
+  S.accountError = ''; S.accountSuccess = '';
+  const pw1 = $('newPassword')?.value || '';
+  const pw2 = $('confirmPassword')?.value || '';
+  if (pw1.length < 6) { S.accountError = 'Password must be at least 6 characters.'; render(); return; }
+  if (pw1 !== pw2) { S.accountError = 'Passwords do not match.'; render(); return; }
+  S.accountLoading = true; render();
+  const { error } = await sb.auth.updateUser({ password: pw1 });
+  S.accountLoading = false;
+  if (error) { S.accountError = error.message; render(); return; }
+  S.accountSuccess = 'Password updated.';
+  render();
+}
+
 function startTimer() {
   clearInterval(S.timerInterval); S.timerInterval = null;
   if (S.activeSession) {
@@ -356,6 +427,8 @@ function render() {
       ${S.showIdleModal ? renderIdleModal() : ''}
       ${S.showClockInModal ? renderClockInModal() : ''}
       ${S.editingSession ? renderEditSessionModal() : ''}
+      ${S.deletingEmployee ? renderDeleteEmployeeModal() : ''}
+      ${S.showAccountModal ? renderAccountModal() : ''}
     `;
   }
   attachEvents();
@@ -411,6 +484,7 @@ function renderNav() {
       <div class="nav-right">
         <span class="nav-email">${esc(S.user?.email || '')}</span>
         ${S.activeSession ? `<span class="badge badge-green"><span class="dot-live"></span> Active</span>` : ''}
+        <button class="nav-account" data-action="openAccount">🔑 Account</button>
         <button class="nav-logout" data-action="logout">Sign Out</button>
       </div>
     </div>
@@ -645,8 +719,12 @@ function renderAccordion(email, rows) {
       <div class="accordion-actions">
         <button class="btn btn-outline btn-sm" data-action="exportEmpCSV" data-email="${email}">⬇ Export CSV</button>
         <button class="btn btn-outline btn-sm" data-action="openManualFor" data-email="${email}">➕ Add Hours</button>
+        <button class="btn btn-outline btn-sm" data-action="sendReset" data-email="${email}">🔑 Reset Password</button>
+        ${S.resetSentFor === email ? `<span class="badge badge-green">✓ Email sent</span>` : ''}
+        <button class="btn btn-danger btn-sm" data-action="openDeleteEmployee" data-email="${email}">🗑 Delete Employee</button>
         <span class="ml-auto text-sm text-muted">${rows.length} sessions · ${hours.toFixed(2)} total hours</span>
       </div>
+      ${S.adminActionError ? `<div class="alert alert-error" style="margin:0 1.25rem 1rem">${esc(S.adminActionError)}</div>` : ''}
       <div class="table-wrap"><table>
         <thead><tr><th>Date</th><th>Task</th><th>In</th><th>Out</th><th>Duration</th><th>Type</th><th></th></tr></thead>
         <tbody>
@@ -661,7 +739,10 @@ function renderAccordion(email, rows) {
             <td class="text-sm">${s.clock_out ? fmt(s.clock_out) : `<span class="badge badge-green">Active</span>`}</td>
             <td class="text-sm">${s.clock_out ? fmtDur(s.clock_in, s.clock_out) : '—'}</td>
             <td>${s.is_manual ? `<span class="badge badge-purple">Manual</span>` : `<span class="badge badge-gray">Normal</span>`}</td>
-            <td><button class="btn btn-outline btn-xs" data-action="editSession" data-id="${s.id}">✏ Edit</button></td>
+            <td style="white-space:nowrap">
+              <button class="btn btn-outline btn-xs" data-action="editSession" data-id="${s.id}">✏ Edit</button>
+              ${!s.clock_out ? `<button class="btn btn-danger btn-xs" data-action="forceClockOut" data-id="${s.id}">⏹ Force Out</button>` : ''}
+            </td>
           </tr>`).join('')}
         </tbody>
       </table></div>
@@ -966,6 +1047,59 @@ function renderEditSessionModal() {
   </div>`;
 }
 
+// ─── Admin: Delete Employee Modal ────────────────────────────────
+function renderDeleteEmployeeModal() {
+  const email = S.deletingEmployee;
+  if (!email) return '';
+  return `
+  <div class="modal-bg" data-action="closeDeleteEmployee">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title">🗑 Delete ${esc(email)}?</div>
+      ${S.deleteError ? `<div class="alert alert-error">${esc(S.deleteError)}</div>` : ''}
+      <div class="alert" style="background:#fff7ed;color:#9a3412;border:1px solid #fed7aa">
+        This permanently deletes their profile and every clock-in/out record they've ever logged. It cannot be undone. Their login stays active, deleting the login itself has to be done from the Supabase dashboard.
+      </div>
+      <div class="form-group">
+        <label>Type <strong>${esc(email)}</strong> to confirm</label>
+        <input id="deleteConfirmInput" type="text" placeholder="${esc(email)}">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-action="closeDeleteEmployee">Cancel</button>
+        <button class="btn btn-danger" data-action="confirmDeleteEmployee" ${S.deleteLoading ? 'disabled' : ''}>
+          ${S.deleteLoading ? '<span class="spin"></span> Deleting...' : '🗑 Permanently Delete'}
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─── My Account Modal ─────────────────────────────────────────────
+function renderAccountModal() {
+  return `
+  <div class="modal-bg" data-action="closeAccount">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title">🔑 My Account</div>
+      ${S.accountError ? `<div class="alert alert-error">${esc(S.accountError)}</div>` : ''}
+      ${S.accountSuccess ? `<div class="alert alert-success">${esc(S.accountSuccess)}</div>` : ''}
+      <p class="text-sm text-muted mb-2">Signed in as <strong>${esc(S.user?.email || '')}</strong></p>
+      <div class="form-group">
+        <label>New Password</label>
+        <input id="newPassword" type="password" placeholder="At least 6 characters">
+      </div>
+      <div class="form-group">
+        <label>Confirm New Password</label>
+        <input id="confirmPassword" type="password" placeholder="Repeat new password">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-action="closeAccount">Close</button>
+        <button class="btn btn-primary" data-action="submitPasswordChange" ${S.accountLoading ? 'disabled' : ''}>
+          ${S.accountLoading ? '<span class="spin"></span> Updating...' : 'Update Password'}
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
 // ─── Events ───────────────────────────────────────────────────
 function attachEvents() {
   document.querySelectorAll('[data-action]').forEach(el => {
@@ -1085,6 +1219,26 @@ async function handleClick(e) {
       S.editClockOut = $('editClockOut')?.value || '';
       await doSaveSessionEdit();
       break;
+    case 'forceClockOut': await doForceClockOut(id); break;
+
+    // Admin: password reset + delete employee
+    case 'sendReset': await doSendPasswordReset(email); break;
+    case 'openDeleteEmployee':
+      S.deletingEmployee = email; S.deleteError = ''; render();
+      break;
+    case 'closeDeleteEmployee':
+      S.deletingEmployee = null; render();
+      break;
+    case 'confirmDeleteEmployee': await doDeleteEmployee(); break;
+
+    // My Account
+    case 'openAccount':
+      S.showAccountModal = true; S.accountError = ''; S.accountSuccess = ''; render();
+      break;
+    case 'closeAccount':
+      S.showAccountModal = false; render();
+      break;
+    case 'submitPasswordChange': await doChangeOwnPassword(); break;
 
     // History
     case 'histApply': await loadAll(); render(); break;
