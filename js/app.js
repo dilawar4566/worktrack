@@ -56,8 +56,9 @@ const S = {
   editTitle: '', editDesc: '', editDate: '', editClockIn: '', editClockOut: '',
   editLoading: false, editError: '',
 
-  // Admin: password reset + delete employee
-  resetSentFor: null, adminActionError: '',
+  // Admin: set employee password directly + delete employee
+  settingPasswordFor: null, setPasswordError: '', setPasswordLoading: false, pwUpdatedFor: null,
+  adminActionError: '',
   deletingEmployee: null, deleteError: '', deleteLoading: false,
 
   // My Account (self password change)
@@ -305,18 +306,45 @@ async function doForceClockOut(sessionId) {
   await loadAdminData(); render();
 }
 
-// Admin: send a password-reset email to an employee. This is the only safe
-// way to help someone reset their password from client-side code, setting
-// a password directly would require Supabase's service_role key, which
-// must never be shipped to the browser.
-async function doSendPasswordReset(email) {
-  S.adminActionError = '';
-  const redirectTo = window.location.origin + window.location.pathname;
-  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
-  if (error) { S.adminActionError = error.message; render(); return; }
-  S.resetSentFor = email;
-  render();
-  setTimeout(() => { if (S.resetSentFor === email) { S.resetSentFor = null; render(); } }, 5000);
+// Admin: set an employee's password directly. Regular client code can only
+// ever change the CURRENTLY signed-in user's own password (see
+// doChangeOwnPassword below) — setting someone else's password requires
+// Supabase's service_role key, which must never be shipped to the browser.
+// So this calls a small Supabase Edge Function (see supabase/functions/
+// admin-set-password in this repo) that holds that key server-side, checks
+// the caller is actually an admin, and only then updates the target user.
+async function doSetEmployeePassword() {
+  const email = S.settingPasswordFor;
+  if (!email) return;
+  S.setPasswordError = '';
+  const pw1 = $('newEmpPassword')?.value || '';
+  const pw2 = $('confirmEmpPassword')?.value || '';
+  if (pw1.length < 6) { S.setPasswordError = 'Password must be at least 6 characters.'; render(); return; }
+  if (pw1 !== pw2) { S.setPasswordError = 'Passwords do not match.'; render(); return; }
+  S.setPasswordLoading = true; render();
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-set-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token || ''}`,
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ email, newPassword: pw1 }),
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(result.error || `Request failed (${res.status})`);
+    S.setPasswordLoading = false;
+    S.settingPasswordFor = null;
+    S.pwUpdatedFor = email;
+    render();
+    setTimeout(() => { if (S.pwUpdatedFor === email) { S.pwUpdatedFor = null; render(); } }, 5000);
+  } catch (err) {
+    S.setPasswordLoading = false;
+    S.setPasswordError = err.message || 'Could not reach the admin-set-password function. Has it been deployed?';
+    render();
+  }
 }
 
 // Admin: permanently delete an employee's profile and every session they've
@@ -427,6 +455,7 @@ function render() {
       ${S.showIdleModal ? renderIdleModal() : ''}
       ${S.showClockInModal ? renderClockInModal() : ''}
       ${S.editingSession ? renderEditSessionModal() : ''}
+      ${S.settingPasswordFor ? renderSetPasswordModal() : ''}
       ${S.deletingEmployee ? renderDeleteEmployeeModal() : ''}
       ${S.showAccountModal ? renderAccountModal() : ''}
     `;
@@ -719,9 +748,8 @@ function renderAccordion(email, rows) {
       <div class="accordion-actions">
         <button class="btn btn-outline btn-sm" data-action="exportEmpCSV" data-email="${email}">⬇ Export CSV</button>
         <button class="btn btn-outline btn-sm" data-action="openManualFor" data-email="${email}">➕ Add Hours</button>
-        <button class="btn btn-outline btn-sm" data-action="sendReset" data-email="${email}">🔑 Reset Password</button>
-        ${S.resetSentFor === email ? `<span class="badge badge-green">✓ Email sent</span>` : ''}
-        <button class="btn btn-danger btn-sm" data-action="openDeleteEmployee" data-email="${email}">🗑 Delete Employee</button>
+        <button class="btn btn-outline btn-sm" data-action="openSetPassword" data-email="${email}">🔑 Set Password</button>
+        ${S.pwUpdatedFor === email ? `<span class="badge badge-green">Password updated</span>` : ''}
         <span class="ml-auto text-sm text-muted">${rows.length} sessions · ${hours.toFixed(2)} total hours</span>
       </div>
       ${S.adminActionError ? `<div class="alert alert-error" style="margin:0 1.25rem 1rem">${esc(S.adminActionError)}</div>` : ''}
@@ -746,6 +774,9 @@ function renderAccordion(email, rows) {
           </tr>`).join('')}
         </tbody>
       </table></div>
+      <div class="accordion-actions" style="border-top:1px solid #fef2f2;border-bottom:none;background:#fff7f7;justify-content:flex-end">
+        <button class="btn btn-danger btn-sm" data-action="openDeleteEmployee" data-email="${email}">🗑 Delete Employee</button>
+      </div>
     </div>` : ''}
   </div>`;
 }
@@ -1048,6 +1079,33 @@ function renderEditSessionModal() {
 }
 
 // ─── Admin: Delete Employee Modal ────────────────────────────────
+function renderSetPasswordModal() {
+  const email = S.settingPasswordFor;
+  if (!email) return '';
+  return `
+  <div class="modal-bg" data-action="closeSetPassword">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title">🔑 Set Password for ${esc(email)}</div>
+      ${S.setPasswordError ? `<div class="alert alert-error">${esc(S.setPasswordError)}</div>` : ''}
+      <div class="form-group">
+        <label>New Password</label>
+        <input id="newEmpPassword" type="password" placeholder="At least 6 characters">
+      </div>
+      <div class="form-group">
+        <label>Confirm New Password</label>
+        <input id="confirmEmpPassword" type="password" placeholder="Repeat new password">
+      </div>
+      <p class="text-xs text-muted" style="margin-top:-.5rem;margin-bottom:1rem">This immediately replaces their current password. Share the new one with them directly.</p>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-action="closeSetPassword">Cancel</button>
+        <button class="btn btn-primary" data-action="submitSetPassword" ${S.setPasswordLoading ? 'disabled' : ''}>
+          ${S.setPasswordLoading ? '<span class="spin"></span> Saving...' : '🔑 Set Password'}
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderDeleteEmployeeModal() {
   const email = S.deletingEmployee;
   if (!email) return '';
@@ -1222,7 +1280,13 @@ async function handleClick(e) {
     case 'forceClockOut': await doForceClockOut(id); break;
 
     // Admin: password reset + delete employee
-    case 'sendReset': await doSendPasswordReset(email); break;
+    case 'openSetPassword':
+      S.settingPasswordFor = email; S.setPasswordError = ''; render();
+      break;
+    case 'closeSetPassword':
+      S.settingPasswordFor = null; render();
+      break;
+    case 'submitSetPassword': await doSetEmployeePassword(); break;
     case 'openDeleteEmployee':
       S.deletingEmployee = email; S.deleteError = ''; render();
       break;
